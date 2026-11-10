@@ -5,3 +5,5 @@ account.txt
 .env
 *.log
 database/data/*.tmp
+downloads/*
+!downloads/.gitkeep

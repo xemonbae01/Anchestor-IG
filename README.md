@@ -82,23 +82,63 @@ Default prefix is `-`. Type just `prefix` in a chat to see the current one.
 | `ping` | latency + uptime check |
 | `uid` | your id, or the replied user's id |
 | `userinfo [@user]` | profile + friendship info |
+| `spy [@user]` | deep intel: profile, counts, friendship status, current note, pic |
 | `threadinfo` | this thread's info, members and nicknames |
 | `uptime` | how long the bot has been running |
 | `count` | your tracked message count |
 | `prefix <p> / reset / <p> -g` | change prefix (reaction confirm) |
 | `admin list/add/remove` | manage bot admins |
+| `adminonly on/off/status` | admin-only mode, saved to config.json (bot admin) |
+| `whitelist on/off/add/remove/list/thread` | user + thread whitelists, saved to config.json (bot admin) |
 | `say <text>` | make the bot say something |
+| `edit <text> / edit last <text>` | edit a bot message (reply to it, or the last one sent) |
+| `unsend` | unsend a bot message (reply to it) |
+| `pin / pin off / pin list` | pin messages in this thread (reply to pin) |
+| `react [emoji] / react off` | react to the replied message |
+| `seen` | mark the replied message as seen |
+| `forward <thread id / @user>` | forward the replied message |
+| `search <text>` | search messages inside this thread |
 | `nickname <name>` | set/clear nicknames in this thread |
 | `theme list/set/reset` | chat themes |
 | `note [post <text> / mine / delete]` | Instagram notes |
 | `poll <q> \| <a> \| <b>` | create a poll |
-| `unsend` | unsend a bot message (reply to it) |
+| `song <name>` | search a song, reply with a number — sends the **30s preview clip from iTunes** (the IG api has no full-song sending; a direct `.mp3`/audio url with `-song <url>` sends that audio as-is) |
+| `pfp [@user]` | send someone's profile picture in HD |
 | `gif <query>` | search and send a gif |
+| `share post/reel/story/profile <...>` | share a post, reel, story or profile into the thread |
+| `dl [url]` | download media (replied message or direct url) into `downloads/`, images/videos get sent back |
+| `adduser @user [...]` | add users to this group |
+| `kick [@user]` | remove someone from this group (group admin) |
+| `promote / demote [@user]` | group admin in / out (group admin) |
+| `settitle <title>` | rename this group thread |
+| `mute / mute off` | mute this thread for the bot account |
+| `leave` | bot leaves the group (reaction confirm, bot admin) |
 | `inbox` | latest conversations (bot admin) |
+| `pending` | message requests — reply with a number to accept, `no <number>` to decline (bot admin) |
 | `follow [follow/unfollow] @user` | friendship status / follow / unfollow |
+| `followers [@user]` | a user's followers (first 20) |
+| `following [@user]` | who a user follows (first 20) |
+| `followreq` | pending follow requests — reply with a number to approve, `no <number>` to ignore (bot admin) |
+| `block / unblock @user` | block / unblock on Instagram (bot admin) |
 | `cmd load/unload/reload <name>` | manage command files at runtime (bot admin) |
 | `restart` | restart the bot (bot admin) |
 | `eval <code>` | run js (bot admin only) |
+
+## Admin only & whitelist modes
+
+Two ways to lock the bot down, both controlled from chat and **saved into
+`config.json`**, so they survive restarts:
+
+- `-adminonly on` — only bot admins (role 2) can use any command. `status`
+  shows the mode, `off` opens it up again.
+- `-whitelist on` — only users whose numeric Instagram id is in
+  `whiteListMode.whiteListIds` can use the bot. Manage the list from chat:
+  `-whitelist add @username` (resolves to the id for you), `-whitelist remove
+  <id>`, `-whitelist list`.
+- `-whitelist thread` — toggles **this** thread in the thread whitelist
+  (`whiteListModeThread`), which restricts the bot to those threads while on.
+
+Bot admins bypass both modes no matter what — you can't lock yourself out.
 
 ## Project structure
 
@@ -122,8 +162,9 @@ anchestor/
 │   └── data/                 # threads.json, users.json, global.json
 ├── ig-chat-api/              # bundled Instagram chat client (see Credits)
 ├── scripts/
-│   ├── cmds/                 # commands
+│   ├── cmds/                 # commands (47)
 │   └── events/               # events
+├── downloads/                # -dl output (git-ignored except .gitkeep)
 └── data/
     └── session.json.example
 ```
@@ -176,8 +217,16 @@ and `globalData.get(key)` / `globalData.set(key, value)` for free-form values.
 
 Commands talk Instagram through the `api` facade (`api.sendMessage`, `api.getThreadInfo`,
 `api.getUserInfo`, `api.setMessageReaction`, `api.unsendMessage`, `api.changeNickname`,
-`api.changeThreadTitle`) — or grab `api.rawClient` for the full ig-chat-api surface
+`api.changeThreadTitle`, `api.editMessage`, `api.pinMessage`, `api.forwardMessage`,
+`api.sendAudioFromUrl`, `api.sendImageFromUrl`, `api.downloadMedia`, `api.shareReel`,
+group admin ops, pending requests, follow requests, blocks, followers and more) —
+or grab `api.rawClient` for the full ig-chat-api surface
 (notes, polls, themes, gifs, follow, inbox and more).
+
+The framework also tracks the bot's own messages per thread
+(`global.temp.lastBotMessage[threadID]`, plus a 10-message ring in
+`global.temp.botMessages[threadID]`) and `message.edit(text, messageID?)` edits
+them — that's what `-edit last` runs on.
 
 ## Security notes
 

@@ -27,23 +27,32 @@ function validateModule(mod, fileName) {
 	return mod.config.name.toLowerCase();
 }
 
-// remove everything a loaded file registered, so reload is clean
-function unregister(name) {
+// remove what a loaded file registered, so reload is clean
+// commands and events are separate worlds: a command and an event can share
+// a name (leave the command vs leave the event) without killing each other
+function unregisterCommand(name) {
 	const A = global.Anchestor;
-	const cmd = A.commands.get(name);
-	if (cmd) {
+	if (A.commands.has(name)) {
 		A.commands.delete(name);
 		for (const [alias, target] of [...A.aliases.entries()])
 			if (target === name) A.aliases.delete(alias);
 		A.onChat = A.onChat.filter((c) => c.config.name !== name);
 		A.onFirstChat = A.onFirstChat.filter((c) => c.config.name !== name);
 	}
-	const ev = A.eventCommands.get(name);
-	if (ev) {
+}
+
+function unregisterEvent(name) {
+	const A = global.Anchestor;
+	if (A.eventCommands.has(name)) {
 		A.eventCommands.delete(name);
 		A.onEvent = A.onEvent.filter((c) => c.config.name !== name);
 		A.onAnyEvent = A.onAnyEvent.filter((c) => c.config.name !== name);
 	}
+}
+
+function unregister(name) {
+	unregisterCommand(name);
+	unregisterEvent(name);
 }
 
 function registerCommand(mod, name) {
@@ -74,7 +83,7 @@ function loadOneCommand(fileName, fresh = false) {
 	if (fresh) delete require.cache[require.resolve(filePath)];
 	const mod = require(filePath);
 	const name = validateModule(mod, fileName);
-	unregister(name);
+	unregisterCommand(name);
 	registerCommand(mod, name);
 	return name;
 }
@@ -84,7 +93,7 @@ function loadOneEvent(fileName, fresh = false) {
 	if (fresh) delete require.cache[require.resolve(filePath)];
 	const mod = require(filePath);
 	const name = validateModule(mod, fileName);
-	unregister(name);
+	unregisterEvent(name);
 	registerEvent(mod, name);
 	return name;
 }
@@ -144,7 +153,7 @@ function loadCommand(name) {
 function unloadCommand(name) {
 	name = String(name).toLowerCase();
 	if (!global.Anchestor.commands.has(name)) throw new Error(`command "${name}" is not loaded`);
-	unregister(name);
+	unregisterCommand(name);
 	return name;
 }
 

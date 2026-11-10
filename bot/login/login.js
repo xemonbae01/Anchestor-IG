@@ -196,6 +196,167 @@ function buildApi(client) {
 		async markAsRead(threadID) {
 			try { return await client.markSeen(String(threadID)); }
 			catch { return null; }
+		},
+
+		async markSeen(threadID, messageID) {
+			if (messageID) return client.markSeen(String(threadID), String(messageID));
+			return client.markSeen(String(threadID));
+		},
+
+		async editMessage(threadID, messageID, text, callback) {
+			try {
+				const res = await client.editMessage(String(threadID), String(messageID), text);
+				if (typeof callback === 'function') callback(null, res);
+				return res;
+			}
+			catch (err) {
+				if (typeof callback === 'function') callback(err);
+				throw err;
+			}
+		},
+
+		async pinMessage(threadID, messageID) {
+			return client.pinMessage(String(threadID), String(messageID));
+		},
+
+		async unpinMessage(threadID, messageID) {
+			return client.unpinMessage(String(threadID), String(messageID));
+		},
+
+		async getPinnedMessages(threadID) {
+			return client.getPinnedMessages(String(threadID));
+		},
+
+		async forwardMessage(fromThreadID, messageID, toThreadID) {
+			return client.forwardMessage(String(fromThreadID), String(messageID), String(toThreadID));
+		},
+
+		async deleteReaction(threadID, messageID) {
+			return client.deleteReaction(String(threadID), String(messageID));
+		},
+
+		async sendAudio(threadID, fileOrUrl) {
+			return client.sendAudio(String(threadID), fileOrUrl);
+		},
+
+		async sendAudioFromUrl(threadID, url) {
+			return client.sendAudioFromUrl(String(threadID), String(url));
+		},
+
+		async sendImage(threadID, fileOrUrl) {
+			return client.sendImage(String(threadID), fileOrUrl);
+		},
+
+		async sendImageFromUrl(threadID, url) {
+			return client.sendImageFromUrl(String(threadID), String(url));
+		},
+
+		async sendVideo(threadID, file) {
+			return client.sendVideo(String(threadID), file);
+		},
+
+		async sendAttachment(threadID, attachment) {
+			return client.sendAttachment(String(threadID), attachment);
+		},
+
+		async downloadMedia(url, destPath) {
+			return client.downloadMedia(String(url), String(destPath));
+		},
+
+		async sharePost(threadID, mediaIdOrUrl) {
+			return client.sharePost(String(threadID), mediaIdOrUrl);
+		},
+
+		async shareReel(threadID, mediaIdOrUrl) {
+			return client.shareReel(String(threadID), mediaIdOrUrl);
+		},
+
+		async shareStory(threadID, storyMediaId) {
+			return client.shareStory(String(threadID), storyMediaId);
+		},
+
+		async shareProfile(threadID, userIdOrUsername) {
+			return client.shareProfile(String(threadID), userIdOrUsername);
+		},
+
+		async addParticipants(threadID, userIds) {
+			return client.addParticipants(String(threadID), Array.isArray(userIds) ? userIds.map(String) : [String(userIds)]);
+		},
+
+		async removeParticipant(threadID, userIds) {
+			return client.removeParticipant(String(threadID), Array.isArray(userIds) ? userIds.map(String) : [String(userIds)]);
+		},
+
+		async promoteAdmin(threadID, userIds) {
+			return client.promoteAdmin(String(threadID), Array.isArray(userIds) ? userIds.map(String) : [String(userIds)]);
+		},
+
+		async demoteAdmin(threadID, userIds) {
+			return client.demoteAdmin(String(threadID), Array.isArray(userIds) ? userIds.map(String) : [String(userIds)]);
+		},
+
+		async setThreadTitle(threadID, title) {
+			return client.setThreadTitle(String(threadID), title);
+		},
+
+		async muteThread(threadID, muted = true) {
+			return client.muteThread(String(threadID), muted);
+		},
+
+		async leaveThread(threadID) {
+			return client.leaveThread(String(threadID));
+		},
+
+		async getPendingConversations(options = {}) {
+			return client.getPendingConversations(options);
+		},
+
+		async acceptMessageRequest(threadID) {
+			return client.acceptMessageRequest(String(threadID));
+		},
+
+		async declineMessageRequest(threadID) {
+			return client.declineMessageRequest(String(threadID));
+		},
+
+		async getPendingFollowRequests(options = {}) {
+			return client.getPendingFollowRequests(options);
+		},
+
+		async approveFollowRequest(userID) {
+			return client.approveFollowRequest(String(userID));
+		},
+
+		async ignoreFollowRequest(userID) {
+			return client.ignoreFollowRequest(String(userID));
+		},
+
+		async blockUser(userID) {
+			return client.blockUser(String(userID));
+		},
+
+		async unblockUser(userID) {
+			return client.unblockUser(String(userID));
+		},
+
+		async getFollowers(userID, options = {}) {
+			return client.getFollowers(String(userID), options);
+		},
+
+		async getFollowing(userID, options = {}) {
+			return client.getFollowing(String(userID), options);
+		},
+
+		async searchInThread(threadID, query, options = {}) {
+			return client.searchInThread(String(threadID), query, options);
+		},
+
+		async findConversationByUsername(username) {
+			return client.findConversationByUsername(String(username).replace(/^@/, ''));
+		},
+
+		async getNoteByUser(usernameOrId) {
+			return client.getNoteByUser(usernameOrId);
 		}
 	};
 	return api;
