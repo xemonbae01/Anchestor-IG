@@ -1,0 +1,1 @@
+{"author":"JARiF","dependencies":{"axios":"^1.7.9"},"description":"Instagram Direct messaging API for Node.js (based on instagram-chat-api by JARiF)","engines":{"node":">=18"},"license":"MIT","main":"src/index.js","name":"ig-chat-api","version":"1.0.0"}

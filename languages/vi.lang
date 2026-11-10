@@ -1,0 +1,19 @@
+[handlerEvents]
+userBanned = Bạn đã bị cấm sử dụng bot.
+reason = Lý do: %1
+threadBanned = Nhóm này đã bị cấm sử dụng bot.
+onlyAdminBox = Chỉ quản trị viên nhóm mới dùng được lệnh này.
+onlyAdminBot = Chỉ admin bot mới dùng được lệnh này.
+adminOnly = Bot đang ở chế độ chỉ admin.
+notInWhiteList = Nhóm này không nằm trong whitelist.
+commandNotFound = Không tìm thấy lệnh "%1". Gõ {p}help để xem tất cả lệnh.
+cooldown = Đợi %1s trước khi dùng lại "%2".
+syntaxError = Sai cú pháp. Cách dùng:\n%1
+
+[Anchestor]
+autoRestart1 = Bot sẽ khởi động lại sau %1
+startBot = anchestor đang khởi động...
+loginSuccess = Đã đăng nhập: %1 (%2)
+
+[handlerCheckData]
+threadBannedMsg = Nhóm này đã bị cấm.

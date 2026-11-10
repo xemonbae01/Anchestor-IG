@@ -1,0 +1,19 @@
+[handlerEvents]
+userBanned = You are banned from using the bot.
+reason = Reason: %1
+threadBanned = This thread is banned from using the bot.
+onlyAdminBox = Only group admins can use this command.
+onlyAdminBot = Only bot admins can use this command.
+adminOnly = Bot is in admin-only mode right now.
+notInWhiteList = This thread is not in the whitelist.
+commandNotFound = Command "%1" not found. Type {p}help to see all commands.
+cooldown = Wait %1s before using "%2" again.
+syntaxError = Wrong syntax. Usage:\n%1
+
+[Anchestor]
+autoRestart1 = Bot will restart in %1
+startBot = anchestor is starting...
+loginSuccess = Logged in as %1 (%2)
+
+[handlerCheckData]
+threadBannedMsg = This thread has been banned.
