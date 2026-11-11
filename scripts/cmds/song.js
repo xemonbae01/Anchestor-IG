@@ -64,30 +64,33 @@ module.exports = {
 		).join("\n");
 		const info = await message.reply(getLang("listHead", list) + getLang("listFoot"));
 		if (info && info.messageID) {
-			global.Anchestor.onReply.set(info.messageID, {
+			require("../../bot/handler/replyStore").setEntry(info.messageID, {
 				commandName: "song",
-				messageID: info.messageID,
 				threadID: event.threadID,
-				senderID: event.senderID,
-				tracks: tracks.map((t) => ({
-					trackName: t.trackName || "unknown",
-					artistName: t.artistName || "?",
-					previewUrl: t.previewUrl
-				}))
+				author: event.senderID,
+				data: {
+					tracks: tracks.map((t) => ({
+						trackName: t.trackName || "unknown",
+						artistName: t.artistName || "?",
+						previewUrl: t.previewUrl
+					}))
+				}
 			});
 		}
 		return info;
 	},
 
-	onReply: async function ({ message, event, args, api, onReply, getLang }) {
-		const tracks = (onReply && onReply.tracks) || [];
+	onReply: async function ({ message, event, args, api, onReply, Reply, getLang }) {
+		const tracks = (onReply && onReply.data && onReply.data.tracks) || onReply.tracks || [];
 		const pick = parseInt(args[0], 10);
 		if (!pick || pick < 1 || pick > tracks.length) {
+			// wrong number, keep the list alive for another try
+			Reply.keep();
 			await message.reply(getLang("badPick"));
 			return true;
 		}
 		const track = tracks[pick - 1];
-		global.Anchestor.onReply.delete(event.messageReply.messageID);
+		Reply.end();
 		try {
 			await module.exports.sendAudio(api, event.threadID, track.previewUrl);
 			await message.send(getLang("sending", track.trackName, track.artistName) + `\n${getLang("previewNote")}`);

@@ -54,9 +54,9 @@ const globalData = {
 	},
 
 	_flush() {
-		const { writeStoreNow } = require('../connectDB/connectJson');
+		const { flushStore } = require('../connectDB/connectJson');
 		ensureStore();
-		writeStoreNow(filePath, store);
+		return flushStore(filePath, store);
 	}
 };
 

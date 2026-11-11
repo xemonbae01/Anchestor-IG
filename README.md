@@ -140,6 +140,58 @@ Two ways to lock the bot down, both controlled from chat and **saved into
 
 Bot admins bypass both modes no matter what — you can't lock yourself out.
 
+## Framework
+
+How the machinery under the commands works:
+
+**Command loader — first come, first served.** Files in `scripts/cmds` load in
+sorted order and the first module to claim a name keeps it. A later module with
+the same `config.name` is *shadowed*, not dropped: it stays reachable through
+its unique aliases (aliases are claimed one by one across names and aliases —
+a taken alias is skipped with a warning, the rest still register). A shadowed
+module with no free alias left loads *dormant*: counted in the boot summary
+(`48 commands and 4 events loaded (0 shadowed, 0 dormant)`) with the reason
+logged. Unloading is ownership-exact — removing the winner frees only its name
+and its own aliases, and reloading a shadowed file afterwards lets it win the
+name. `-cmd collisions` prints the full registry story, `-cmd reloadall`
+reloads everything, and custom aliases saved under the `setalias` global data
+are applied after file loading through the same rules.
+
+**Reply system.** `replyStore.setEntry(messageID, { commandName, threadID,
+author, ttlMs, data })` binds a flow to a bot message. Entries are author
+locked (someone else's reply falls through to normal handling), thread locked,
+and expire after 5 minutes by default (`ttlMs` per entry). Inside `onReply`,
+`Reply.keep(newData?)` survives to the next reply with a fresh TTL,
+`Reply.end()` closes the flow, and a handled reply that does neither is
+consumed — so one-shot flows need no cleanup code. `replyStore.setSession({
+commandName, threadID, author, data })` goes one step further: the author's
+next *plain* message in the thread continues the flow, no quote-reply needed.
+A prefixed message always wins over a session.
+
+**Message pipeline.** Every message runs: data/ban checks → whitelist gates →
+reactions → quote replies → reply sessions (plain messages only) → `onChat`
+hooks → command parsing → per-thread command bans → admin-only gate → role
+gate → cooldown → `onStart`. Cooldowns are per command + thread + user and
+answer with the remaining wait time; bot admins skip them. Unknown commands
+get did-you-mean suggestions (`-pign` → "Did you mean: -pin, -ping?") unless
+`hideNotiMessage.commandNotFound` is on. A command that throws gets its user
+one clean `⚠️ <cmd> hit an error: ...` reply and the bot keeps running.
+
+**Sending.** `message.reply` / `message.send` split long texts into ~900
+character chunks on line boundaries and resolve with the last chunk's info,
+so reply flows keep working on huge outputs.
+
+**Hot reload.** Set `autoLoadScripts.enable` in `config.json` and edits under
+`scripts/cmds` / `scripts/events` reload just that file (400 ms debounce,
+`ignoreCmds` / `ignoreEvents` lists respected). Off by default.
+
+**Stats & shutdown.** Every successful command run is counted in the
+`commandUsage` / `commandUsageTotal` global data — see `-usage`. On
+SIGINT/SIGTERM the bot disconnects, flushes the json database and exits 0
+(`index.js` only restarts on code 2). The json store serializes writes per
+file and keeps a `.bak` of the previous good content; a corrupt data file
+falls back to its backup instead of crashing the boot.
+
 ## Project structure
 
 ```
@@ -154,7 +206,7 @@ anchestor/
 ├── languages/                # en.lang, vi.lang, makeFuncGetLangs.js
 ├── bot/
 │   ├── login/                # login.js (session + api facade), loadData, loadScripts
-│   └── handler/              # handlerEvents (dispatch), handlerAction (message obj), handlerCheckData
+│   └── handler/              # handlerEvents (dispatch), handlerAction (message obj), handlerCheckData, replyStore
 ├── database/
 │   ├── connectDB/            # json store (+ mongo/sqlite stubs)
 │   ├── controller/           # threadsData, usersData, globalData
@@ -162,7 +214,7 @@ anchestor/
 │   └── data/                 # threads.json, users.json, global.json
 ├── ig-chat-api/              # bundled Instagram chat client (see Credits)
 ├── scripts/
-│   ├── cmds/                 # commands (47)
+│   ├── cmds/                 # commands (48)
 │   └── events/               # events
 ├── downloads/                # -dl output (git-ignored except .gitkeep)
 └── data/
@@ -172,7 +224,8 @@ anchestor/
 ## Configuration
 
 `config.json` — prefix, bot admins, admin-only mode, whitelists, timezone, database type
-(`json` is the one wired up), auto restart, log toggles and the `instagram` section
+(`json` is the one wired up), auto restart, `autoLoadScripts` (hot reload of command
+files, off by default), log toggles and the `instagram` section
 (session path, poll interval, debug).
 
 `configCommands.json` — `envGlobal` / `envCommands` / `envEvents` for per-script settings
@@ -206,7 +259,9 @@ module.exports = {
 
 Commands get `{ api, message, event, args, threadsData, usersData, globalData, commandName, getLang, role, prefix }`.
 Optional hooks: `onChat` (runs on every message, return `true` if handled), `onReply`
-(fires when someone replies to a message you registered in `global.Anchestor.onReply`),
+(fires when someone replies to a message you registered with
+`replyStore.setEntry(...)` from `bot/handler/replyStore.js` — see the Framework
+section for TTLs, author locks and `Reply.keep()` / `Reply.end()`),
 and `onReaction` (same idea with `global.Anchestor.onReaction`, keyed by messageID).
 Events live in `scripts/events/` with `onEvent` / `onStart` — files ending in `.eg.js`
 are examples and never load.

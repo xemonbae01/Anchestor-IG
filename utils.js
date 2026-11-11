@@ -79,6 +79,48 @@ function delay(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function levenshtein(a, b) {
+	a = String(a || '');
+	b = String(b || '');
+	if (a === b) return 0;
+	if (!a.length) return b.length;
+	if (!b.length) return a.length;
+	let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+	for (let i = 1; i <= a.length; i++) {
+		const cur = [i];
+		for (let j = 1; j <= b.length; j++) {
+			cur[j] = Math.min(
+				prev[j] + 1,
+				cur[j - 1] + 1,
+				prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+			);
+		}
+		prev = cur;
+	}
+	return prev[b.length];
+}
+
+// did-you-mean for command names. candidates can be plain names or
+// { name, display } when an alias should point at its canonical command
+function suggest(input, candidates, max = 3) {
+	const needle = String(input || '').toLowerCase();
+	if (!needle) return [];
+	const scored = [];
+	const seen = new Set();
+	for (const cand of candidates || []) {
+		const name = typeof cand === 'string' ? cand : cand.name;
+		const display = typeof cand === 'string' ? cand : (cand.display || cand.name);
+		if (!name || seen.has(display)) continue;
+		const dist = levenshtein(needle, String(name).toLowerCase());
+		const similarity = 1 - dist / Math.max(needle.length, String(name).length, 1);
+		if (similarity < 0.45) continue;
+		seen.add(display);
+		scored.push({ display, dist, similarity });
+	}
+	scored.sort((x, y) => (x.dist - y.dist) || (y.similarity - x.similarity));
+	return scored.slice(0, max).map((s) => s.display);
+}
+
 function splitOnce(text, sep) {
 	const idx = String(text).indexOf(sep);
 	if (idx === -1) return [String(text), ''];
@@ -96,5 +138,7 @@ module.exports = {
 	isNumber,
 	removeHomeDir,
 	delay,
-	splitOnce
+	splitOnce,
+	levenshtein,
+	suggest
 };

@@ -41,8 +41,13 @@ global.Anchestor = {
 	onChat: [],
 	onEvent: [],
 	onReply: new Map(),
+	onReplySession: new Map(),
 	onReaction: new Map(),
 	onAnyEvent: [],
+	modulesByFile: new Map(),
+	collisions: [],
+	shutdown: null,
+	shutdownHooks: [],
 	config,
 	configCommands,
 	configIgApi,
@@ -108,6 +113,54 @@ if (config.autoRestart && config.autoRestart.time) {
 		}, time);
 	}
 }
+
+// light config sanity check, warnings only — a bad value shouldn't kill boot
+{
+	const warn = (msg) => global.utils.log.warn('CONFIG', msg);
+	if (typeof config.prefix !== 'string' || !config.prefix)
+		warn('config.prefix should be a non-empty string, commands may not parse');
+	if (!Array.isArray(config.adminBot))
+		warn('config.adminBot should be an array of user ids');
+	const dbType = ((config.database || {}).type || 'json').toLowerCase();
+	if (!['json', 'sqlite', 'mongodb'].includes(dbType))
+		warn(`config.database.type "${dbType}" is unknown, expected json/sqlite/mongodb`);
+	if (config.autoLoadScripts !== undefined && typeof config.autoLoadScripts !== 'object')
+		warn('config.autoLoadScripts should be an object like { enable: false }');
+}
+
+// reply entries expire on their own, sweep the leftovers now and then
+require('./bot/handler/replyStore').startSweeper();
+
+// graceful shutdown: disconnect the client, flush the json db, exit 0
+// (index.js only restarts on exit code 2, so 0 stays down on purpose)
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	global.utils.log.info('Anchestor', `${signal} received, shutting down...`);
+	try {
+		if (typeof global.Anchestor.shutdown === 'function') await global.Anchestor.shutdown();
+		for (const hook of global.Anchestor.shutdownHooks || []) {
+			try { await hook(); } catch { /* one bad hook shouldn't block the rest */ }
+		}
+	}
+	catch (err) {
+		global.utils.log.error('Anchestor', `shutdown hook failed: ${err.message}`);
+	}
+	try {
+		const flushes = [];
+		for (const ctrl of [global.db.threadsData, global.db.usersData, global.db.globalData])
+			if (ctrl && typeof ctrl._flush === 'function') flushes.push(ctrl._flush());
+		await Promise.all(flushes);
+		global.utils.log.success('Anchestor', 'database flushed, bye');
+	}
+	catch (err) {
+		global.utils.log.error('Anchestor', `failed to flush database: ${err.message}`);
+	}
+	process.exit(0);
+}
+process.on('SIGINT', () => { gracefulShutdown('SIGINT'); });
+process.on('SIGTERM', () => { gracefulShutdown('SIGTERM'); });
 
 global.utils.log.master('Anchestor', 'anchestor is starting...');
 

@@ -28,12 +28,11 @@ module.exports = {
 			const info = await message.reply("pending message requests:\n" + lines.join("\n") +
 				"\nreply with a number to accept, or \"no <number>\" to decline");
 			if (info && info.messageID) {
-				global.Anchestor.onReply.set(info.messageID, {
+				require("../../bot/handler/replyStore").setEntry(info.messageID, {
 					commandName: "pending",
-					messageID: info.messageID,
 					threadID: event.threadID,
-					senderID: event.senderID,
-					items: list.slice(0, 20).map((c) => String(c.id || c.threadId))
+					author: event.senderID,
+					data: { items: list.slice(0, 20).map((c) => String(c.id || c.threadId)) }
 				});
 			}
 			return info;
@@ -43,16 +42,19 @@ module.exports = {
 		}
 	},
 
-	onReply: async function ({ message, event, api, onReply }) {
-		const items = (onReply && onReply.items) || [];
+	onReply: async function ({ message, event, api, onReply, Reply }) {
+		const items = (onReply && onReply.data && onReply.data.items) || onReply.items || [];
 		const body = (event.body || "").trim().toLowerCase();
 		const decline = /^no\s+(\d+)$/.exec(body);
 		const accept = /^(\d+)$/.exec(body);
 		const num = decline ? Number(decline[1]) : accept ? Number(accept[1]) : null;
 		if (!num || num < 1 || num > items.length) {
+			// not a pick, keep the list alive
+			Reply.keep();
 			await message.reply("reply with a number from the list (or \"no <number>\" to decline)");
 			return true;
 		}
+		Reply.end();
 		const target = items[num - 1];
 		const client = api.rawClient;
 		try {

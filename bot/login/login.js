@@ -403,7 +403,13 @@ async function start() {
 	const api = buildApi(client);
 	global.Anchestor.api = api;
 
-	await loadScripts(api);
+	// Anchestor.js calls this on SIGINT/SIGTERM
+	global.Anchestor.shutdown = async () => {
+		try { await client.disconnect(); }
+		catch { /* already gone */ }
+	};
+
+	const loadCounts = await loadScripts(api);
 
 	async function dispatch(event) {
 		try { await handlerEvents({ api, event }); }
@@ -473,6 +479,10 @@ async function start() {
 	await client.connect();
 	global.Anchestor.botID = client.session && client.session.userId ? String(client.session.userId) : null;
 	global.utils.log.success('LOGIN', global.utils.getText('Anchestor', 'loginSuccess', client.username || 'unknown', global.Anchestor.botID || '?'));
+	global.utils.log.success('READY',
+		`anchestor is online — ${loadCounts.commands} commands, ${loadCounts.events} events` +
+		` (${loadCounts.shadowed} shadowed, ${loadCounts.dormant} dormant), prefix "${config.prefix}",` +
+		` database ${((config.database || {}).type || 'json')}, session ${client.session && client.session.sessionPath ? client.session.sessionPath : 'data/session.json'}`);
 	return { client, api };
 }
 

@@ -85,9 +85,9 @@ const threadsData = {
 	},
 
 	_flush() { // used by tests/shutdown
-		const { writeStoreNow } = require('../connectDB/connectJson');
+		const { flushStore } = require('../connectDB/connectJson');
 		ensureStore();
-		writeStoreNow(filePath, store);
+		return flushStore(filePath, store);
 	}
 };
 

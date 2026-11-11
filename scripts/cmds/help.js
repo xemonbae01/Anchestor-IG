@@ -24,7 +24,8 @@ module.exports = {
 	},
 
 	onStart: async function ({ message, args, prefix, getLang }) {
-		const all = [...global.Anchestor.commands.values()];
+		const entries = [...global.Anchestor.commands.entries()];
+		const all = entries.map(([, cmd]) => cmd);
 		if (args[0]) {
 			const name = global.Anchestor.aliases.get(args[0].toLowerCase()) || args[0].toLowerCase();
 			const cmd = global.Anchestor.commands.get(name);
@@ -37,9 +38,10 @@ module.exports = {
 			return message.reply(text);
 		}
 		const byCategory = {};
-		for (const cmd of all) {
+		for (const [key, cmd] of entries) {
 			const cat = cmd.config.category || "misc";
-			(byCategory[cat] = byCategory[cat] || []).push(cmd.config.name);
+			// a shadowed command is listed by the alias it actually answers to
+			(byCategory[cat] = byCategory[cat] || []).push(key === cmd.config.name ? cmd.config.name : key);
 		}
 		let list = "";
 		for (const cat of Object.keys(byCategory).sort())
