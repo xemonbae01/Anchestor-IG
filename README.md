@@ -12,7 +12,7 @@ Developed by **xemonbae01** (Redwan Ahemed) — https://github.com/xemonbae01
 - Event system for thread updates — welcomes, goodbyes, thread info sync, console logging
 - Per-thread prefix (changeable in chat, with reaction confirmation), global prefix for bot admins
 - `onChat`, `onReply` and `onReaction` hooks so commands can hold conversations
-- Zero-config json database (threads / users / global), atomic debounced writes
+- Zero-config json database (threads / users / global), atomic debounced writes — or MongoDB, same data, one config flip
 - Works in DMs and group threads, admin-only mode and whitelist modes included
 - Bundled `ig-chat-api` client — polling based, no browser automation, no official API token needed
 
@@ -223,10 +223,56 @@ so reply flows keep working on huge outputs.
 
 **Stats & shutdown.** Every successful command run is counted in the
 `commandUsage` / `commandUsageTotal` global data — see `-usage`. On
-SIGINT/SIGTERM the bot disconnects, flushes the json database and exits 0
-(`index.js` only restarts on code 2). The json store serializes writes per
-file and keeps a `.bak` of the previous good content; a corrupt data file
-falls back to its backup instead of crashing the boot.
+SIGINT/SIGTERM the bot disconnects, flushes the database and exits 0
+(`index.js` only restarts on code 2); with MongoDB the client closes after
+the flush. The json store serializes writes per file and keeps a `.bak` of
+the previous good content; a corrupt data file falls back to its backup
+instead of crashing the boot.
+
+## MongoDB
+
+The default store is json — zero setup, files in `database/data/`. If you
+want the data in MongoDB (shared across machines, survives a wiped VPS),
+flip one setting: `database.type` in `config.json` to `"mongodb"`. The
+commands don't change at all — both backends serve the same controllers,
+same record shapes, same API. The MongoDB collections are `threads`,
+`users` and `global` (one document per key, `{ _id: "<key>", value: ... }`),
+indexes on `threadID` / `userID` are created on boot.
+
+**Atlas free tier setup:**
+
+1. Create a free cluster at [cloud.mongodb.com](https://cloud.mongodb.com)
+   (M0, no card needed).
+2. Database Access → add a database user (username + password, read/write).
+3. Network Access → add your IP, or `0.0.0.0/0` if the bot runs on a VPS
+   with a changing IP.
+4. Cluster → Connect → Drivers → copy the `mongodb+srv://...` connection
+   string, replacing `<password>` with the user's password.
+5. Put it in `config.json` under `database.uriMongodb`, or in a `.env` file
+   as `MONGODB_URI=` (see `.env.example`). Env wins over config.
+6. Set `database.type` to `"mongodb"` and start the bot. A bad URI or a
+   blocked network kills the boot fast (~5s) with the reason — no silent
+   fallback, a bot with no database is worse than one that won't start.
+
+A local `mongod` works the same way: `mongodb://127.0.0.1:27017/anchestor`
+as the URI. The database name comes from `database.dbName` (default
+`anchestor`), `MONGODB_DB`, or the name in the URI path.
+
+**Migrating your existing json data:**
+
+```bash
+npm run migrate:mongo            # imports database/data/*.json, idempotent
+node scripts/migrate-to-mongo.js --dry-run   # counts only, writes nothing
+```
+
+The migration upserts everything and verifies counts + a sample record
+afterwards. Run it once, then flip `database.type`. Switching back to json
+is just the type change — each backend keeps its own data, nothing syncs
+between them, so pick one and stick with it.
+
+On the VPS, `node update.js` picks up the new `mongodb` dependency
+automatically — `package.json` changed, so it runs `npm install` once for
+you.
 
 ## Project structure
 
@@ -245,14 +291,16 @@ anchestor/
 │   ├── login/                # login.js (session + api facade), sessionFile, loadData, loadScripts
 │   └── handler/              # handlerEvents (dispatch), handlerAction (message obj), handlerCheckData, replyStore
 ├── database/
-│   ├── connectDB/            # json store (+ mongo/sqlite stubs)
+│   ├── connectDB/            # json store, mongodb connector (+ sqlite stub)
 │   ├── controller/           # threadsData, usersData, globalData
-│   ├── models/
+│   ├── models/mongodb/       # collection descriptors + indexes
+│   ├── store.js              # one store interface, json + mongodb backends
 │   └── data/                 # threads.json, users.json, global.json
 ├── ig-chat-api/              # bundled Instagram chat client (see Credits)
 ├── scripts/
 │   ├── cmds/                 # commands (48)
-│   └── events/               # events
+│   ├── events/               # events
+│   └── migrate-to-mongo.js   # json -> mongodb import (npm run migrate:mongo)
 ├── downloads/                # -dl output (git-ignored except .gitkeep)
 └── data/
     └── session.json.example
@@ -261,8 +309,8 @@ anchestor/
 ## Configuration
 
 `config.json` — prefix, bot admins, admin-only mode, whitelists, timezone, database type
-(`json` is the one wired up), auto restart, `autoLoadScripts` (hot reload of command
-files, off by default), log toggles and the `instagram` section
+(`json` default, `mongodb` wired up — see MongoDB), auto restart, `autoLoadScripts`
+(hot reload of command files, off by default), log toggles and the `instagram` section
 (session file `account.txt`, fallback path, poll interval, debug).
 
 `configCommands.json` — `envGlobal` / `envCommands` / `envEvents` for per-script settings

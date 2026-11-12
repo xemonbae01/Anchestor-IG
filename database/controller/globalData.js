@@ -1,17 +1,41 @@
 'use strict';
 
 const path = require('path');
-const { readStore, saveStore, getPath, setPath } = require('../connectDB/connectJson');
+const { createStore } = require('../store');
+const { getPath, setPath } = require('../connectDB/connectJson');
 
 const filePath = path.join(__dirname, '..', 'data', 'global.json');
 let store = null;
 
-function ensureStore() {
+function buildStore() {
+	const backend = (global.db && global.db.backend) || { kind: 'json' };
+	if (backend.kind === 'mongodb') {
+		// global docs are { _id: "<key>", value: <any> }
+		return createStore('mongodb', {
+			collection: backend.collections.global,
+			keyField: '_id',
+			encode: (key, value) => ({ _id: key, value }),
+			decode: (doc) => ({ key: String(doc._id), value: doc.value })
+		});
+	}
+	return createStore('json', {
+		filePath,
+		normalize: (raw) => raw || {}
+	});
+}
+
+async function ensureStore() {
 	if (!store) {
-		store = readStore(filePath, {});
-		if (global.db) global.db.allGlobalData = store;
+		store = buildStore();
+		await store.load();
+		refreshCache();
 	}
 	return store;
+}
+
+function refreshCache() {
+	// allGlobalData is a plain object map, same as before
+	if (global.db) global.db.allGlobalData = store ? Object.fromEntries(store.entries()) : {};
 }
 
 const globalData = {
@@ -19,44 +43,54 @@ const globalData = {
 
 	// globalData.get("adminBot") / get("settings", "a.b", defaultValue)
 	async get(key, pathStr, defaultValue) {
-		ensureStore();
-		if (!(key in store)) return defaultValue;
+		await ensureStore();
+		const val = store.get(key);
+		if (val === undefined) return defaultValue;
 		if (pathStr) {
-			const val = getPath(store[key], pathStr);
-			return val === undefined ? defaultValue : val;
+			const out = getPath(val, pathStr);
+			return out === undefined ? defaultValue : out;
 		}
-		return store[key];
+		return val;
 	},
 
 	// globalData.set("adminBot", [...]) / set("settings", value, "a.b")
 	async set(key, value, pathStr) {
-		ensureStore();
+		await ensureStore();
 		if (pathStr) {
-			if (store[key] === null || typeof store[key] !== 'object') store[key] = {};
-			setPath(store[key], pathStr, value);
+			let cur = store.get(key);
+			if (cur === null || typeof cur !== 'object') cur = {};
+			setPath(cur, pathStr, value);
+			store.set(key, cur);
+			refreshCache();
+			return cur;
 		}
-		else store[key] = value;
-		if (global.db) global.db.allGlobalData = store;
-		saveStore(filePath, store);
-		return store[key];
+		store.set(key, value);
+		refreshCache();
+		return value;
 	},
 
 	async create(key, value) {
-		ensureStore();
-		if (!(key in store)) store[key] = value;
-		saveStore(filePath, store);
-		return store[key];
+		await ensureStore();
+		if (store.get(key) === undefined) store.set(key, value);
+		refreshCache();
+		return store.get(key);
 	},
 
 	peek(key) {
-		ensureStore();
-		return store[key];
+		if (!store) {
+			store = buildStore();
+			store.load().catch(() => {});
+		}
+		return store.get(key);
 	},
 
-	_flush() {
-		const { flushStore } = require('../connectDB/connectJson');
-		ensureStore();
-		return flushStore(filePath, store);
+	async _flush() {
+		await ensureStore();
+		return store.flush();
+	},
+
+	_reset() { // tests only
+		store = null;
 	}
 };
 

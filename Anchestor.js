@@ -10,6 +10,26 @@ const path = require('path');
 
 const rootDir = __dirname;
 
+// tiny .env loader, no dependency. runs before anything else reads env so
+// MONGODB_URI and friends work from a plain file. only fills vars that
+// aren't already set — real env always wins.
+{
+	const envPath = path.join(rootDir, '.env');
+	if (fs.existsSync(envPath)) {
+		for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith('#')) continue;
+			const eq = trimmed.indexOf('=');
+			if (eq <= 0) continue;
+			const key = trimmed.slice(0, eq).trim();
+			let value = trimmed.slice(eq + 1).trim();
+			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+				value = value.slice(1, -1);
+			if (key && !(key in process.env)) process.env[key] = value;
+		}
+	}
+}
+
 function loadJson(file, required = true) {
 	const filePath = path.join(rootDir, file);
 	if (!fs.existsSync(filePath)) {
@@ -152,6 +172,10 @@ async function gracefulShutdown(signal) {
 		for (const ctrl of [global.db.threadsData, global.db.usersData, global.db.globalData])
 			if (ctrl && typeof ctrl._flush === 'function') flushes.push(ctrl._flush());
 		await Promise.all(flushes);
+		// mongo closes after the flush, never before — the flush writes to it
+		if (global.db.mongo && typeof global.db.mongo.close === 'function') {
+			try { await global.db.mongo.close(); } catch { /* already gone */ }
+		}
 		global.utils.log.success('Anchestor', 'database flushed, bye');
 	}
 	catch (err) {

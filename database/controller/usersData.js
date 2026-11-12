@@ -1,20 +1,38 @@
 'use strict';
 
 const path = require('path');
-const { readStore, saveStore, getPath, setPath } = require('../connectDB/connectJson');
+const { createStore } = require('../store');
+const { getPath, setPath } = require('../connectDB/connectJson');
 
 const filePath = path.join(__dirname, '..', 'data', 'users.json');
 let store = null;
 
-function ensureStore() {
-	if (!store) {
-		store = readStore(filePath, {});
-		if (Array.isArray(store)) {
-			const obj = {};
-			for (const u of store) if (u && u.userID) obj[String(u.userID)] = u;
-			store = obj;
+function buildStore() {
+	const backend = (global.db && global.db.backend) || { kind: 'json' };
+	if (backend.kind === 'mongodb') {
+		return createStore('mongodb', {
+			collection: backend.collections.users,
+			keyField: 'userID'
+		});
+	}
+	return createStore('json', {
+		filePath,
+		normalize(raw) {
+			if (Array.isArray(raw)) {
+				const obj = {};
+				for (const u of raw) if (u && u.userID) obj[String(u.userID)] = u;
+				return obj;
+			}
+			return raw || {};
 		}
-		if (global.db) global.db.allUserData = Object.values(store);
+	});
+}
+
+async function ensureStore() {
+	if (!store) {
+		store = buildStore();
+		await store.load();
+		refreshCache();
 	}
 	return store;
 }
@@ -33,58 +51,69 @@ function defaultRecord(userID) {
 }
 
 function refreshCache() {
-	if (global.db) global.db.allUserData = Object.values(store);
+	if (global.db) global.db.allUserData = store ? store.getAll() : [];
 }
 
 const usersData = {
 	_filePath: filePath,
 
 	async get(userID, pathStr) {
-		ensureStore();
+		await ensureStore();
 		const id = String(userID);
-		if (!store[id]) {
-			store[id] = defaultRecord(id);
+		let rec = store.get(id);
+		if (!rec) {
+			rec = defaultRecord(id);
+			store.set(id, rec);
 			refreshCache();
-			saveStore(filePath, store);
 		}
-		if (pathStr) return getPath(store[id], pathStr);
-		return store[id];
+		if (pathStr) return getPath(rec, pathStr);
+		return rec;
 	},
 
 	async set(userID, value, pathStr) {
-		ensureStore();
+		await ensureStore();
 		const id = String(userID);
-		if (!store[id]) store[id] = defaultRecord(id);
-		if (pathStr) setPath(store[id], pathStr, value);
-		else if (value && typeof value === 'object') Object.assign(store[id], value);
+		let rec = store.get(id);
+		if (!rec) rec = defaultRecord(id);
+		if (pathStr) setPath(rec, pathStr, value);
+		else if (value && typeof value === 'object') Object.assign(rec, value);
+		store.set(id, rec);
 		refreshCache();
-		saveStore(filePath, store);
-		return store[id];
+		return rec;
 	},
 
 	async getAll() {
-		ensureStore();
-		return Object.values(store);
+		await ensureStore();
+		return store.getAll();
 	},
 
 	async create(userID, data = {}) {
-		ensureStore();
+		await ensureStore();
 		const id = String(userID);
-		if (!store[id]) store[id] = { ...defaultRecord(id), ...data };
+		let rec = store.get(id);
+		if (!rec) {
+			rec = { ...defaultRecord(id), ...data };
+			store.set(id, rec);
+		}
 		refreshCache();
-		saveStore(filePath, store);
-		return store[id];
+		return rec;
 	},
 
 	peek(userID) {
-		ensureStore();
-		return store[String(userID)] || null;
+		if (!store) {
+			store = buildStore();
+			store.load().catch(() => {});
+		}
+		return store.get(String(userID)) || null;
 	},
 
-	_flush() {
-		const { flushStore } = require('../connectDB/connectJson');
-		ensureStore();
-		return flushStore(filePath, store);
+	async _flush() {
+		await ensureStore();
+		return store.flush();
+	},
+
+	_reset() { // tests only
+		store = null;
 	}
 };
 
