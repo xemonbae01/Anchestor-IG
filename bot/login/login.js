@@ -420,6 +420,17 @@ async function start() {
 	const client = new InstaChatClient(sessionOpts);
 	global.Anchestor.igApi = client;
 
+	// the session file is the user's own paste — nothing rewrites it until
+	// instagram has actually accepted the login. the client's cookie hook
+	// calls session.save() on every response, including the failed health
+	// check, so every save goes through this gate (updateFromSetCookie
+	// calls this.save, the shutdown hook below calls it too).
+	let loggedIn = false;
+	if (client.session && typeof client.session.save === 'function') {
+		const realSessionSave = client.session.save.bind(client.session);
+		client.session.save = (...args) => (loggedIn ? realSessionSave(...args) : false);
+	}
+
 	// env sessions must never be written to disk — the client auto-saves on
 	// cookie refresh whenever sessionPath is set, so clear it here
 	if (sessionOpts.sessionSource === 'env' && client.session)
@@ -507,6 +518,7 @@ async function start() {
 	client.on('error', (err) => handlerWhenListenHasError(err));
 
 	await client.connect();
+	loggedIn = true; // from here on, refreshed cookies may be saved back
 	global.Anchestor.botID = client.session && client.session.userId ? String(client.session.userId) : null;
 	global.utils.log.success('LOGIN', global.utils.getText('Anchestor', 'loginSuccess', client.username || 'unknown', global.Anchestor.botID || '?'));
 	global.utils.log.success('READY',

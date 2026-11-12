@@ -17,6 +17,12 @@ class Session {
     this.createdAt = null;
     this.expiresAt = null;
     this.logger = options.logger || null;
+    // PATCH (anchestor): remember the shape the file was loaded in so save()
+    // writes it back the same way — a Cookie-Editor array stays an array.
+    // _originalItems keeps the array entries (domain, expiry, ...) so a
+    // refresh only updates values instead of dropping the metadata.
+    this._fileFormat = null;
+    this._originalItems = null;
   }
 
   /**
@@ -69,33 +75,46 @@ class Session {
       // Handles browser extensions JSON export (Cookie-Editor, EditThisCookie, etc.):
       // [{ "name": "sessionid", "value": "..." }, ...]
       this.cookies = {};
+      this._fileFormat = 'array';
+      this._originalItems = [];
       for (const item of data) {
         if (item && item.name && item.value !== undefined) {
           this.cookies[item.name] = String(item.value);
+          this._originalItems.push({ ...item });
         }
       }
     } else if (typeof data === 'object' && data !== null) {
       if (typeof data.cookies === 'object' && data.cookies !== null) {
         if (Array.isArray(data.cookies)) {
           this.cookies = {};
+          this._fileFormat = 'array';
+          this._originalItems = [];
           for (const item of data.cookies) {
             if (item && item.name && item.value !== undefined) {
               this.cookies[item.name] = String(item.value);
+              this._originalItems.push({ ...item });
             }
           }
         } else {
           this.cookies = { ...data.cookies };
+          // Session.save() output carries cookieString/createdAt; a plain
+          // { cookies: {...} } file does not — keep them distinct on write.
+          this._fileFormat = ('cookieString' in data || 'createdAt' in data) ? 'session' : 'cookies';
         }
       } else if (typeof data.cookieString === 'string') {
         this.cookies = Session.parseCookieString(data.cookieString);
+        this._fileFormat = 'session';
       } else if (data.sessionid) {
         // Flat cookie dictionary: { sessionid: '...', csrftoken: '...', ds_user_id: '...' }
         this.cookies = { ...data };
+        this._fileFormat = 'flat';
       } else {
         this.cookies = {};
+        this._fileFormat = 'session';
       }
     } else {
       this.cookies = {};
+      this._fileFormat = 'session';
     }
 
     this.userId = (data && data.userId) || this.cookies.ds_user_id || null;
@@ -202,7 +221,48 @@ class Session {
   }
 
   /**
+   * Serializes the session in the same shape it was loaded in, so a
+   * refresh never reformats the user's file. (PATCH, anchestor.)
+   */
+  _serializeForSave() {
+    if (this._fileFormat === 'array' && Array.isArray(this._originalItems)) {
+      const seen = new Set();
+      const items = [];
+      for (const item of this._originalItems) {
+        if (!(item.name in this.cookies)) continue; // cookie was deleted
+        seen.add(item.name);
+        items.push({ ...item, value: this.cookies[item.name] });
+      }
+      for (const [name, value] of Object.entries(this.cookies)) {
+        if (seen.has(name)) continue;
+        items.push({ domain: '.instagram.com', hostOnly: false, httpOnly: false, name, path: '/', secure: true, session: true, value });
+      }
+      return items;
+    }
+    if (this._fileFormat === 'cookies') {
+      const out = { cookies: { ...this.cookies } };
+      if (this.userId) out.userId = String(this.userId);
+      return out;
+    }
+    if (this._fileFormat === 'flat') {
+      return { ...this.cookies };
+    }
+    return {
+      userId: this.userId,
+      username: this.username,
+      cookies: this.cookies,
+      cookieString: this.getCookieString(),
+      createdAt: this.createdAt ? this.createdAt.toISOString() : new Date().toISOString(),
+      expiresAt: this.expiresAt ? this.expiresAt.toISOString() : null
+    };
+  }
+
+  /**
    * Saves current session to a JSON file.
+   *
+   * PATCH (anchestor): writes tmp + rename so a kill mid-write can never
+   * leave a half-written file, and keeps the previous good content in
+   * <file>.bak before replacing it.
    *
    * @param {string} [targetPath]
    */
@@ -217,16 +277,13 @@ class Session {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    const data = {
-      userId: this.userId,
-      username: this.username,
-      cookies: this.cookies,
-      cookieString: this.getCookieString(),
-      createdAt: this.createdAt ? this.createdAt.toISOString() : new Date().toISOString(),
-      expiresAt: this.expiresAt ? this.expiresAt.toISOString() : null
-    };
-
-    fs.writeFileSync(resolved, JSON.stringify(data, null, 2), 'utf-8');
+    const data = this._serializeForSave();
+    const tmp = `${resolved}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    if (fs.existsSync(resolved)) {
+      try { fs.copyFileSync(resolved, `${resolved}.bak`); } catch { /* backup is best effort */ }
+    }
+    fs.renameSync(tmp, resolved);
     this.sessionPath = resolved;
     return true;
   }

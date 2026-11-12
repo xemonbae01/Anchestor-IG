@@ -61,10 +61,13 @@ export (`datr`, `mid`, `ig_did`, …) is ignored. The Netscape text format
 (`#HttpOnly_.instagram.com … sessionid …`) and a raw cookie string
 (`sessionid=...; csrftoken=...; ds_user_id=...`) work too.
 
-You don't have to re-paste your cookies: the bot saves refreshed cookies back
-into the same file while it runs (and once more on shutdown), so the session
-stays fresh by itself. If the cookies do expire one day, just paste a fresh
-export over `account.txt` and restart.
+You don't have to re-paste your cookies: once instagram has accepted the login,
+the bot saves refreshed cookies back into the same file while it runs (and
+once more on shutdown), so the session stays fresh by itself — in the same
+format you pasted (a Cookie-Editor array stays an array), written atomically
+with the previous copy kept in `account.txt.bak`. Until a login succeeds the
+file is never touched, so a bad session can't eat your paste. If the cookies
+do expire one day, just paste a fresh export over `account.txt` and restart.
 
 Priority order, if you use more than one: env vars (`IG_COOKIE_STRING`, or
 `IG_SESSION_ID` + `IG_CSRF_TOKEN` + `IG_USER_ID`) → `account.txt` (changeable

@@ -2,6 +2,8 @@ node_modules/
 data/session.json
 *.session.json
 account.txt
+account.txt.bak
+account.txt.tmp
 .env
 *.log
 database/data/*.tmp
