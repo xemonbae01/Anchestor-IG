@@ -99,6 +99,12 @@ class InstaChatClient extends EventEmitter {
       });
     }
 
+    // PATCH (anchestor): the bot hands us parsed cookies, not the file —
+    // adopt the file's original format so save-back keeps the user's shape.
+    if (this.config.sessionFormat && typeof this.session.adoptFileFormat === 'function') {
+      this.session.adoptFileFormat(this.config.sessionFormat, this.config.sessionItems);
+    }
+
     // 4. Initialize transport layer
     this.transport = new HttpTransport({
       session: this.session,

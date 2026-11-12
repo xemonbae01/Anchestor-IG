@@ -221,6 +221,17 @@ class Session {
   }
 
   /**
+   * Adopts the file format a session was pasted in — used when the session
+   * was loaded from a parsed object instead of the file itself, so save()
+   * still writes back in the user's format. PATCH (anchestor).
+   */
+  adoptFileFormat(format, items) {
+    if (!format) return;
+    this._fileFormat = format;
+    if (format === 'array' && Array.isArray(items)) this._originalItems = items.map((i) => ({ ...i }));
+  }
+
+  /**
    * Serializes the session in the same shape it was loaded in, so a
    * refresh never reformats the user's file. (PATCH, anchestor.)
    */

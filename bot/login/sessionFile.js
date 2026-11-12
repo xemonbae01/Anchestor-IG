@@ -131,6 +131,32 @@ function loadSessionFile(filePath) {
 	return parsed;
 }
 
+// what shape is the session file in? the bot parses the cookies itself and
+// hands them to the ig client as an object, so the client never sees the
+// file — this tells it the original format so a save-back keeps it. returns
+// null for Netscape text / raw cookie strings (no json shape to keep).
+function detectFileFormat(filePath) {
+	try {
+		const raw = fs.readFileSync(filePath, 'utf8').trim();
+		if (!raw) return null;
+		let data;
+		try { data = JSON.parse(raw); }
+		catch { return null; }
+		if (Array.isArray(data))
+			return { format: 'array', items: data.filter((i) => i && typeof i.name === 'string').map((i) => ({ ...i })) };
+		if (data && typeof data === 'object') {
+			if (Array.isArray(data.cookies))
+				return { format: 'array', items: data.cookies.filter((i) => i && typeof i.name === 'string').map((i) => ({ ...i })) };
+			if (data.cookies && typeof data.cookies === 'object')
+				return { format: ('cookieString' in data || 'createdAt' in data) ? 'session' : 'cookies', items: null };
+			if (data.sessionid)
+				return { format: 'flat', items: null };
+		}
+		return null;
+	}
+	catch { return null; }
+}
+
 // canonical shape we write back: { "cookies": {...}, "userId": "..." }
 // (Session.save() writes a superset of this, which also parses fine)
 function formatSessionJson(cookies, userId) {
@@ -143,5 +169,6 @@ module.exports = {
 	parseSessionText,
 	loadSessionFile,
 	formatSessionJson,
-	parseCookieString
+	parseCookieString,
+	detectFileFormat
 };

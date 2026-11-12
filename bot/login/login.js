@@ -70,6 +70,13 @@ function resolveSessionOptions(config, configIgApi, rootOverride) {
 		opts.cookies = parsed.cookies;
 		opts.userId = parsed.userId;
 		opts.sessionPath = filePath;
+		// the client loads the cookies from this object, not the file — hand
+		// it the file's original format so a save-back keeps the user's shape
+		const detected = sessionFile.detectFileFormat(filePath);
+		if (detected) {
+			opts.sessionFormat = detected.format;
+			opts.sessionItems = detected.items;
+		}
 		opts.sessionSource = 'file';
 		opts.sessionLabel = path.relative(root, filePath) || path.basename(filePath);
 		if (!parsed.cookies.csrftoken)
@@ -519,6 +526,14 @@ async function start() {
 
 	await client.connect();
 	loggedIn = true; // from here on, refreshed cookies may be saved back
+	// the GraphQL health check doesn't return the profile name — resolve it
+	// once, best effort, so the log shows the real handle, not "unknown"
+	if (!client.username && client.session && client.session.userId) {
+		try {
+			const me = await client.users.getUserById(client.session.userId);
+			if (me && me.username) client.session.username = me.username;
+		} catch { /* username stays unknown, not fatal */ }
+	}
 	global.Anchestor.botID = client.session && client.session.userId ? String(client.session.userId) : null;
 	global.utils.log.success('LOGIN', global.utils.getText('Anchestor', 'loginSuccess', client.username || 'unknown', global.Anchestor.botID || '?'));
 	global.utils.log.success('READY',
