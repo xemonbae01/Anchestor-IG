@@ -237,8 +237,14 @@ class InstaChatClient extends EventEmitter {
    */
   async _verifySession() {
     this.logger.debug('Verifying session health via Direct inbox...');
-    await this.conversations.getGraphQLInbox({ limit: 1 });
-    this.logger.info(`Session verified! Logged in as user ${this.session.userId}`);
+    const inbox = await this.conversations.getGraphQLInbox({ limit: 1 });
+    // every inbox thread includes the logged-in user as a participant —
+    // take the handle from there, no extra request needed
+    const me = (inbox.conversations || [])
+      .flatMap((c) => c.participants || [])
+      .find((u) => String(u.id) === String(this.session.userId));
+    if (me && me.username) this.session.username = me.username;
+    this.logger.info(`Session verified! Logged in as ${this.session.username ? `@${this.session.username}` : `user ${this.session.userId}`}`);
   }
 
   /**

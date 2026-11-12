@@ -526,14 +526,6 @@ async function start() {
 
 	await client.connect();
 	loggedIn = true; // from here on, refreshed cookies may be saved back
-	// the GraphQL health check doesn't return the profile name — resolve it
-	// once, best effort, so the log shows the real handle, not "unknown"
-	if (!client.username && client.session && client.session.userId) {
-		try {
-			const me = await client.users.getUserById(client.session.userId);
-			if (me && me.username) client.session.username = me.username;
-		} catch { /* username stays unknown, not fatal */ }
-	}
 	global.Anchestor.botID = client.session && client.session.userId ? String(client.session.userId) : null;
 	global.utils.log.success('LOGIN', global.utils.getText('Anchestor', 'loginSuccess', client.username || 'unknown', global.Anchestor.botID || '?'));
 	global.utils.log.success('READY',
