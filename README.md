@@ -69,6 +69,12 @@ with the previous copy kept in `account.txt.bak`. Until a login succeeds the
 file is never touched, so a bad session can't eat your paste. If the cookies
 do expire one day, just paste a fresh export over `account.txt` and restart.
 
+If login still says the session expired right after a fresh export, check for
+a pending Instagram popup first: open instagram.com in the browser, logged in
+as the bot account — a dialog like Accounts Center, cross-app sharing, or a
+business-tools confirmation blocks the API for a perfectly valid session, and
+dismissing it fixes the login with no new cookies needed.
+
 Priority order, if you use more than one: env vars (`IG_COOKIE_STRING`, or
 `IG_SESSION_ID` + `IG_CSRF_TOKEN` + `IG_USER_ID`) → `account.txt` (changeable
 via `instagram.sessionFile` in config.json, or `IG_SESSION_PATH`) →
