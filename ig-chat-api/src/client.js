@@ -4,7 +4,6 @@ const EventEmitter = require('events');
 const fs = require('fs');
 
 const Events = require('./constants/events');
-const Endpoints = require('./constants/endpoints');
 const Session = require('./auth/session');
 const HttpTransport = require('./transport/http');
 const RealtimeEngine = require('./transport/realtime');
@@ -221,38 +220,19 @@ class InstaChatClient extends EventEmitter {
   }
 
   /**
-   * Verifies the session is alive. Primary check is the web profile state;
-   * if Instagram answers that with the logged-out page, fall back to the
-   * Direct inbox before calling the session dead — a pending account prompt
-   * (Accounts Center, cross-app sharing, business tools, ...) makes the web
-   * endpoints serve the logged-out page for a perfectly valid session, and
-   * the inbox call surfaces the real reason (error 4415001) instead.
+   * Verifies the session is alive by calling the same GraphQL inbox the bot
+   * actually runs on. The old shared_data web endpoint returns the logged-out
+   * page even for valid sessions now, and the app REST inbox answers web
+   * requests with error 4415001 for valid sessions too — both lie, so verify
+   * against the one call that tells the truth. Calls getGraphQLInbox
+   * directly: getInbox would swallow an auth failure and fall back to REST.
+   * A dead session fails here with the real verdict (expired, checkpoint).
    * PATCH (anchestor).
    */
   async _verifySession() {
-    try {
-      this.logger.debug('Verifying session health via Instagram profile state...');
-      const response = await this.transport.get('https://www.instagram.com/data/shared_data/');
-      const viewer = response.data && response.data.config && response.data.config.viewer;
-      if (viewer) {
-        this.session.userId = String(viewer.id || this.session.userId);
-        this.session.username = viewer.username || this.session.username;
-        this.logger.info(`Session verified! Logged in as @${viewer.username} (${viewer.id})`);
-        return;
-      }
-    } catch (err) {
-      // A specific failure (checkpoint, rate limit, prompt, network) is
-      // already the answer — only a plain "logged out" verdict earns the
-      // second check.
-      if (err.code && err.code !== 'SESSION_EXPIRED') throw err;
-    }
-    // shared_data said logged-out (or had no viewer) — confirm against the
-    // Direct inbox before declaring the session dead. A 200 here means the
-    // session is alive and the web check was misleading; anything else
-    // throws the real reason (prompt required, checkpoint, expired).
-    this.logger.debug('Web profile check was inconclusive, verifying via Direct inbox...');
-    await this.transport.get(`${Endpoints.INBOX}?visual_message_return_type=unseen&thread_message_limit=1`);
-    this.logger.info('Session verified via Direct inbox (profile name unavailable).');
+    this.logger.debug('Verifying session health via Direct inbox...');
+    await this.conversations.getGraphQLInbox({ limit: 1 });
+    this.logger.info(`Session verified! Logged in as user ${this.session.userId}`);
   }
 
   /**

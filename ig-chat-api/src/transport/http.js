@@ -136,6 +136,10 @@ class HttpTransport {
     }
 
     let message = responseData.message;
+    // PATCH (anchestor): GraphQL failures carry the reason in errors[0],
+    // not message — surface it instead of a bare axios status line.
+    if (!message && Array.isArray(responseData.errors) && responseData.errors[0])
+      message = responseData.errors[0].message;
     if (!message) {
       if (isHtml) {
         message = `Instagram returned an unexpected HTML error page (HTTP ${status}).`;

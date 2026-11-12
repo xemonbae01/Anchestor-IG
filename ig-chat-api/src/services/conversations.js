@@ -5,7 +5,7 @@ const Endpoints = require('../constants/endpoints');
 const Conversation = require('../models/conversation');
 const Message = require('../models/message');
 const { validateThreadId, validateSearchQuery } = require('../utils/validators');
-const { NotFoundError, ValidationError, InstaChatError } = require('../utils/errors');
+const { NotFoundError, ValidationError, InstaChatError, AuthenticationError } = require('../utils/errors');
 
 class ConversationsService {
   constructor(options = {}) {
@@ -81,6 +81,11 @@ class ConversationsService {
           return gqlResult;
         }
       } catch (err) {
+        // PATCH (anchestor): an auth failure is final — falling back to REST
+        // would only mask it (REST answers valid sessions with 4415001 when
+        // GraphQL hiccups). fall back only for transport/GraphQL breakage.
+        if (err && (err.code === 'SESSION_EXPIRED' || err.code === 'CHECKPOINT_REQUIRED' || err.code === 'PROMPT_REQUIRED'))
+          throw err;
         if (this.logger && typeof this.logger.debug === 'function') {
           this.logger.debug(`GraphQL inbox bypassed: ${err.message}. Falling back to REST inbox.`);
         }
@@ -204,6 +209,16 @@ class ConversationsService {
       }
     });
 
+    // PATCH (anchestor): a 200 with a GraphQL errors array is Instagram
+    // talking, not a malformed response — surface it, and call an auth
+    // failure what it is so the login error names the real problem.
+    const gqlErrors = response.data && response.data.errors;
+    if (Array.isArray(gqlErrors) && gqlErrors.length > 0) {
+      const msg = gqlErrors[0].message || 'GraphQL error';
+      if (/login|logged|auth|session|checkpoint/i.test(msg))
+        throw new AuthenticationError(`Instagram session is invalid: ${msg}`, { code: 'SESSION_EXPIRED' });
+      throw new Error(`Instagram GraphQL error: ${msg}`);
+    }
     const data = response.data && response.data.data;
     if (!data || !data.get_slide_mailbox_for_iris_subscription) {
       throw new Error('Malformed GraphQL inbox response');
