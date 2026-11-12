@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 const rootDir = path.join(__dirname, '..');
+require('../loadEnv')(rootDir);
 const models = require('../database/models/mongodb');
 
 function readJsonFile(filePath) {

@@ -10,25 +10,9 @@ const path = require('path');
 
 const rootDir = __dirname;
 
-// tiny .env loader, no dependency. runs before anything else reads env so
-// MONGODB_URI and friends work from a plain file. only fills vars that
-// aren't already set — real env always wins.
-{
-	const envPath = path.join(rootDir, '.env');
-	if (fs.existsSync(envPath)) {
-		for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith('#')) continue;
-			const eq = trimmed.indexOf('=');
-			if (eq <= 0) continue;
-			const key = trimmed.slice(0, eq).trim();
-			let value = trimmed.slice(eq + 1).trim();
-			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
-				value = value.slice(1, -1);
-			if (key && !(key in process.env)) process.env[key] = value;
-		}
-	}
-}
+// .env loader, runs before anything else reads env so MONGODB_URI and
+// friends work from a plain file. shared with scripts/migrate-to-mongo.js.
+require('./loadEnv')(rootDir);
 
 function loadJson(file, required = true) {
 	const filePath = path.join(rootDir, file);
