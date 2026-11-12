@@ -32,11 +32,21 @@ npm install
 The bot logs in with your Instagram web session cookies — no password is stored anywhere.
 
 1. Open [instagram.com](https://www.instagram.com) in your browser and log in.
-2. Open DevTools → Application → Cookies → `https://www.instagram.com`.
-3. Copy the values of `sessionid`, `csrftoken` and `ds_user_id`.
-4. Create `data/session.json` (see `data/session.json.example`):
+2. Export the cookies with a browser extension like Cookie-Editor — JSON export
+   works, Netscape export works, or just copy the three values by hand.
+3. Paste them into **`account.txt`** in the project root. Any of these shapes work:
 
 ```json
+// Cookie-Editor JSON export — paste the array as-is, extra fields ignored
+[
+  { "name": "sessionid", "value": "..." },
+  { "name": "csrftoken", "value": "..." },
+  { "name": "ds_user_id", "value": "..." }
+]
+```
+
+```json
+// or just the three cookies that matter
 {
   "cookies": {
     "sessionid": "your sessionid",
@@ -46,10 +56,21 @@ The bot logs in with your Instagram web session cookies — no password is store
 }
 ```
 
-Alternatives:
+Only `sessionid`, `csrftoken` and `ds_user_id` are needed — the rest of the
+export (`datr`, `mid`, `ig_did`, …) is ignored. The Netscape text format
+(`#HttpOnly_.instagram.com … sessionid …`) and a raw cookie string
+(`sessionid=...; csrftoken=...; ds_user_id=...`) work too.
 
-- Put the same JSON in `account.txt` in the project root (also git-ignored).
-- Or use environment variables: `IG_COOKIE_STRING` (a raw `sessionid=...; csrftoken=...; ds_user_id=...` string), or `IG_SESSION_ID` + `IG_CSRF_TOKEN` + `IG_USER_ID`. `IG_SESSION_PATH` overrides the session file location.
+You don't have to re-paste your cookies: the bot saves refreshed cookies back
+into the same file while it runs (and once more on shutdown), so the session
+stays fresh by itself. If the cookies do expire one day, just paste a fresh
+export over `account.txt` and restart.
+
+Priority order, if you use more than one: env vars (`IG_COOKIE_STRING`, or
+`IG_SESSION_ID` + `IG_CSRF_TOKEN` + `IG_USER_ID`) → `account.txt` (changeable
+via `instagram.sessionFile` in config.json, or `IG_SESSION_PATH`) →
+`data/session.json` (see `data/session.json.example`). Env sessions are never
+written back to disk. `account.txt` and `data/session.json` are git-ignored.
 
 ### 2. Configure
 
@@ -71,6 +92,21 @@ npm start
 (that's what the `-restart` command uses).
 
 Then DM the account from another account and send `-help`.
+
+## Updating (on a VPS, no re-clone)
+
+```bash
+node update.js
+```
+
+It fetches the remote file list from GitHub, compares git blob hashes, and
+downloads **only the files that changed** — no `git clone`, no `npm install`
+unless `package.json` itself changed. Your `account.txt`, `data/`,
+`database/data/`, `downloads/` and config files are never touched; if a config
+file changed upstream you get a `<file>.new` to merge by hand. Replaced files
+are backed up under `update-backup/<timestamp>/` first. Flags:
+`--dry-run` (show the plan, change nothing), `--force` (skip the prompt),
+`--branch <name>`, `--no-backup`, `--restart` (`pm2 restart anchestor`).
 
 ## Commands
 
@@ -198,6 +234,7 @@ falls back to its backup instead of crashing the boot.
 anchestor/
 ├── index.js                  # spawns Anchestor.js, restarts on exit code 2
 ├── Anchestor.js              # core init: globals, config watch, auto restart
+├── update.js                 # self-updater: pulls only changed files from GitHub
 ├── config.json               # main config
 ├── configCommands.json       # per-command env, banned commands, unload lists
 ├── configIgApi.json          # ig-chat-api client options
@@ -205,7 +242,7 @@ anchestor/
 ├── logger/                   # log, logColor, loading
 ├── languages/                # en.lang, vi.lang, makeFuncGetLangs.js
 ├── bot/
-│   ├── login/                # login.js (session + api facade), loadData, loadScripts
+│   ├── login/                # login.js (session + api facade), sessionFile, loadData, loadScripts
 │   └── handler/              # handlerEvents (dispatch), handlerAction (message obj), handlerCheckData, replyStore
 ├── database/
 │   ├── connectDB/            # json store (+ mongo/sqlite stubs)
@@ -226,7 +263,7 @@ anchestor/
 `config.json` — prefix, bot admins, admin-only mode, whitelists, timezone, database type
 (`json` is the one wired up), auto restart, `autoLoadScripts` (hot reload of command
 files, off by default), log toggles and the `instagram` section
-(session path, poll interval, debug).
+(session file `account.txt`, fallback path, poll interval, debug).
 
 `configCommands.json` — `envGlobal` / `envCommands` / `envEvents` for per-script settings
 (e.g. `envEvents.logsbot.allow`), `commandBanned` per thread, and `commandUnload` /

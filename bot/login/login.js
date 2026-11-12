@@ -5,6 +5,7 @@ const path = require('path');
 
 const loadData = require('./loadData');
 const loadScripts = require('./loadScripts');
+const sessionFile = require('./sessionFile');
 const handlerEvents = require('../handler/handlerEvents');
 const handlerWhenListenHasError = require('./handlerWhenListenHasError');
 
@@ -13,22 +14,26 @@ const rootDir = path.join(__dirname, '..', '..');
 // thread info cache, ig doesn't push full thread data with every message
 const threadCache = new Map();
 
-function readJsonIfExists(filePath) {
-	try {
-		if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-	}
-	catch (err) {
-		global.utils.log.error('LOGIN', `failed to parse ${filePath}: ${err.message}`);
-	}
-	return null;
+function log() {
+	return (global.utils && global.utils.log) || console;
 }
 
-// session can come from env, data/session.json or account.txt (same json format)
-function resolveSessionOptions(config, configIgApi) {
-	const igCfg = config.instagram || {};
-	const sessionPath = path.resolve(rootDir, process.env.IG_SESSION_PATH || igCfg.sessionPath || 'data/session.json');
+// session priority: env vars > account.txt > data/session.json.
+// whichever FILE wins, its path becomes opts.sessionPath AND its cookies get
+// passed in opts.cookies — that makes the ig client save refreshed cookies
+// back into the same file you pasted them into, so you never re-paste.
+// env sessions are never written back to disk (see start()).
+// rootOverride is only for tests, so they can point at a temp dir.
+function resolveSessionOptions(config, configIgApi, rootOverride) {
+	const root = rootOverride || rootDir;
+	const igCfg = (config && config.instagram) || {};
+	const primaryName = process.env.IG_SESSION_PATH || igCfg.sessionFile || 'account.txt';
+	const primaryPath = path.resolve(root, primaryName);
+	const fallbackPath = path.resolve(root, igCfg.sessionPath || 'data/session.json');
 	const opts = {
-		sessionPath,
+		sessionPath: fallbackPath,
+		sessionSource: 'none',
+		sessionLabel: null,
 		pollIntervalMs: Number(igCfg.pollIntervalMs || configIgApi.pollIntervalMs || 3000),
 		requestTimeoutMs: Number(configIgApi.requestTimeoutMs || 15000),
 		maxRetries: Number(configIgApi.maxRetries || 2),
@@ -38,6 +43,9 @@ function resolveSessionOptions(config, configIgApi) {
 
 	if (process.env.IG_COOKIE_STRING) {
 		opts.cookieString = process.env.IG_COOKIE_STRING;
+		opts.sessionSource = 'env';
+		opts.sessionLabel = 'env (IG_COOKIE_STRING)';
+		log().info('LOGIN', 'session from environment variables');
 		return opts;
 	}
 	if (process.env.IG_SESSION_ID) {
@@ -47,20 +55,31 @@ function resolveSessionOptions(config, configIgApi) {
 			ds_user_id: process.env.IG_USER_ID || ''
 		};
 		if (process.env.IG_USER_ID) opts.userId = process.env.IG_USER_ID;
+		opts.sessionSource = 'env';
+		opts.sessionLabel = 'env (IG_SESSION_ID)';
+		log().info('LOGIN', 'session from environment variables');
 		return opts;
 	}
 
-	if (!fs.existsSync(sessionPath)) {
-		// fallback: account.txt holding the same { cookies: {...} } json
-		const accountFile = path.join(rootDir, 'account.txt');
-		const fromAccount = readJsonIfExists(accountFile);
-		if (fromAccount) {
-			if (fromAccount.cookies) opts.cookies = fromAccount.cookies;
-			else if (fromAccount.sessionid) opts.cookies = fromAccount;
-			if (fromAccount.userId) opts.userId = fromAccount.userId;
-			global.utils.log.info('LOGIN', 'no session file found, using account.txt');
-		}
+	// file sources, in order. a file that exists but won't parse is a hard
+	// error — silently falling through to a stale session.json would just
+	// resurrect old cookies and confuse everyone.
+	for (const filePath of [primaryPath, fallbackPath]) {
+		if (!fs.existsSync(filePath)) continue;
+		const parsed = sessionFile.loadSessionFile(filePath); // throws on bad content
+		opts.cookies = parsed.cookies;
+		opts.userId = parsed.userId;
+		opts.sessionPath = filePath;
+		opts.sessionSource = 'file';
+		opts.sessionLabel = path.relative(root, filePath) || path.basename(filePath);
+		if (!parsed.cookies.csrftoken)
+			log().warn('LOGIN', `${opts.sessionLabel} has no csrftoken — login may fail, re-export your cookies`);
+		log().info('LOGIN', `session from ${opts.sessionLabel} (refreshed cookies are saved back there)`);
+		return opts;
 	}
+
+	// nothing anywhere — the client throws its own clear "session file not
+	// found" error on connect, keep that instead of inventing a new one
 	return opts;
 }
 
@@ -397,14 +416,25 @@ async function start() {
 	await loadData();
 
 	const { InstaChatClient } = require('../../ig-chat-api');
-	const client = new InstaChatClient(resolveSessionOptions(config, configIgApi));
+	const sessionOpts = resolveSessionOptions(config, configIgApi);
+	const client = new InstaChatClient(sessionOpts);
 	global.Anchestor.igApi = client;
+
+	// env sessions must never be written to disk — the client auto-saves on
+	// cookie refresh whenever sessionPath is set, so clear it here
+	if (sessionOpts.sessionSource === 'env' && client.session)
+		client.session.sessionPath = null;
 
 	const api = buildApi(client);
 	global.Anchestor.api = api;
 
-	// Anchestor.js calls this on SIGINT/SIGTERM
+	// Anchestor.js calls this on SIGINT/SIGTERM — save the session first so
+	// any refreshed cookies land back in account.txt before we go
 	global.Anchestor.shutdown = async () => {
+		if (sessionOpts.sessionSource === 'file' && client.session) {
+			try { client.session.save(); }
+			catch { /* session file may be gone, not fatal */ }
+		}
 		try { await client.disconnect(); }
 		catch { /* already gone */ }
 	};
@@ -490,7 +520,7 @@ async function start() {
 if (require.main !== module && !global.__anchestorLoginManual) {
 	start().catch((err) => {
 		handlerWhenListenHasError(err);
-		if (global.utils) global.utils.log.error('LOGIN', `failed to login: ${err.message}. check data/session.json (see data/session.json.example)`);
+		if (global.utils) global.utils.log.error('LOGIN', `failed to login: ${err.message}. check account.txt (or data/session.json) — see README`);
 	});
 }
 
@@ -499,3 +529,4 @@ module.exports.start = start;
 module.exports.buildApi = buildApi;
 module.exports.normalizeMessage = normalizeMessage;
 module.exports.resolveSessionOptions = resolveSessionOptions;
+module.exports.sessionFile = sessionFile;

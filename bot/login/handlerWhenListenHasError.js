@@ -6,7 +6,7 @@ module.exports = function handlerWhenListenHasError(err) {
 	const log = global.utils ? global.utils.log : console;
 	const msg = err.message || String(err);
 	if (err.code === 'SESSION_EXPIRED' || /session/i.test(msg) && /expired|invalid|terminated/i.test(msg)) {
-		log.error('LISTEN', 'instagram session expired. grab fresh sessionid/csrftoken cookies and update data/session.json');
+		log.error('LISTEN', 'instagram session expired. grab fresh sessionid/csrftoken cookies and update account.txt');
 		return;
 	}
 	if (err.code === 'RATE_LIMIT' || /rate.?limit|429/i.test(msg)) {

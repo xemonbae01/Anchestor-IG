@@ -8,3 +8,6 @@ database/data/*.tmp
 database/data/*.bak
 downloads/*
 !downloads/.gitkeep
+.update-manifest.json
+update-backup/
+*.new
