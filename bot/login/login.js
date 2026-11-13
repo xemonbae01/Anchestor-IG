@@ -532,6 +532,13 @@ async function start() {
 		`anchestor is online — ${loadCounts.commands} commands, ${loadCounts.events} events` +
 		` (${loadCounts.shadowed} shadowed, ${loadCounts.dormant} dormant), prefix "${config.prefix}",` +
 		` database ${((config.database || {}).type || 'json')}, session ${client.session && client.session.sessionPath ? client.session.sessionPath : 'data/session.json'}`);
+	// self-updates: watch the repo for new code and restart into it
+	// (no-op unless config.update.auto.enabled — see bot/login/autoUpdate.js)
+	try {
+		require('./autoUpdate').startAutoUpdate({ root: rootDir, config, log: global.utils.log });
+	} catch (err) {
+		global.utils.log.warn('UPDATE', `auto-update failed to start: ${err.message}`);
+	}
 	return { client, api };
 }
 

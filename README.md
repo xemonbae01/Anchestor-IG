@@ -116,8 +116,26 @@ unless `package.json` itself changed. Your `account.txt`, `data/`,
 `database/data/`, `downloads/` and config files are never touched; if a config
 file changed upstream you get a `<file>.new` to merge by hand. Replaced files
 are backed up under `update-backup/<timestamp>/` first. Flags:
-`--dry-run` (show the plan, change nothing), `--force` (skip the prompt),
-`--branch <name>`, `--no-backup`, `--restart` (`pm2 restart anchestor`).
+`--dry-run` (show the plan, change nothing), `--check` (exit 0 if up to date,
+2 if an update is out), `--force` (skip the prompt), `--branch <name>`,
+`--repo <owner/name>` (update from a fork), `--no-backup`, `--restart`
+(`pm2 restart anchestor`).
+
+**Forks work with no setup.** The updater figures out which repo to pull
+from: `--repo` or `config.json` `update.repo` wins, then the git remote of
+the folder it runs in (so a fork's copy updates from the fork itself), then
+the upstream repo. Same for the branch: config, then the checked-out git
+branch, then `main`. Set `update.repo` to `xemonbae01/Anchestor-IG` in a
+fork's config if you'd rather track upstream than your own fork.
+
+**Automatic updates.** Set `update.auto.enabled` to `true` in `config.json`
+and the bot watches its repo itself — every `intervalMinutes` (default 15,
+minimum 5) it checks GitHub, and when new code is out it applies the update
+and restarts into it on its own. Silent when there's nothing to do. It only
+runs when something can restart the bot (`node index.js` or pm2); a restart
+may miss messages sent during the few seconds the bot is down, same as a
+manual restart. Admins can also check or update on demand from chat:
+`-update check` shows what's new, `-update now` applies it and restarts.
 
 ## Commands
 
@@ -169,6 +187,7 @@ Default prefix is `-`. Type just `prefix` in a chat to see the current one.
 | `block / unblock @user` | block / unblock on Instagram (bot admin) |
 | `cmd load/unload/reload <name>` | manage command files at runtime (bot admin) |
 | `restart` | restart the bot (bot admin) |
+| `update [check\|now]` | check for new code, or update + restart into it (bot admin) |
 | `eval <code>` | run js (bot admin only) |
 
 ## Admin only & whitelist modes

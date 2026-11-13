@@ -7,7 +7,14 @@
 //   node update.js --dry-run     show what would change, touch nothing
 //   node update.js --force       skip the confirmation prompt
 //   node update.js --branch dev  update from another branch
+//   node update.js --repo me/Anchestor-IG   update from a fork instead
+//   node update.js --check       exit 0 if up to date, 2 if an update is out
 //   node update.js --restart     also `pm2 restart anchestor` at the end
+//
+// which repo? config.json `update.repo` wins, then the git remote of this
+// folder (so a fork's copy updates from the fork), then the upstream
+// default. same for the branch: config, then the checked-out branch, then
+// main. see update/source.js.
 //
 // how it works: fetch the remote git tree, compare every file's git blob sha
 // (sha1 of "blob <len>\0<bytes>") against the local copy, download only what
@@ -23,9 +30,11 @@ const https = require('https');
 const readline = require('readline');
 const { spawnSync } = require('child_process');
 
-const OWNER = 'xemonbae01';
-const REPO = 'Anchestor-IG';
-const DEFAULT_BRANCH = 'main';
+const sourceMod = require('./update/source');
+
+const OWNER = sourceMod.DEFAULT_OWNER;
+const REPO = sourceMod.DEFAULT_REPO;
+const DEFAULT_BRANCH = sourceMod.DEFAULT_BRANCH;
 const MANIFEST_FILE = '.update-manifest.json';
 const BACKUP_DIR = 'update-backup';
 const MAX_LIST = 50;
@@ -92,8 +101,11 @@ function httpsGet(url, { binary = false, headers = {} } = {}, redirects = 3) {
 	});
 }
 
-async function fetchTree(branch) {
-	const url = `https://api.github.com/repos/${OWNER}/${REPO}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
+// source is { owner, repo } — optional, upstream by default
+async function fetchTree(branch, source) {
+	const owner = (source && source.owner) || OWNER;
+	const repo = (source && source.repo) || REPO;
+	const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`;
 	const headers = { Accept: 'application/vnd.github+json' };
 	const tk = token();
 	if (tk) headers.Authorization = `Bearer ${tk}`;
@@ -105,7 +117,7 @@ async function fetchTree(branch) {
 		if (err.status === 403 && /rate limit/i.test(err.body || ''))
 			throw new Error('GitHub API rate limit hit (60/hr without a token) — set GH_TOKEN and try again, or wait a bit');
 		if (err.status === 404)
-			throw new Error(`branch "${branch}" not found on ${OWNER}/${REPO}`);
+			throw new Error(`branch "${branch}" not found on ${owner}/${repo}`);
 		throw err;
 	}
 	const data = JSON.parse(text);
@@ -181,6 +193,10 @@ function planHasWork(plan) {
 	return plan.added.length || plan.updated.length || plan.deleted.length || plan.configNew.length;
 }
 
+function planChangedCount(plan) {
+	return plan.added.length + plan.updated.length + plan.deleted.length + plan.configNew.length;
+}
+
 function printPlan(plan) {
 	const show = (label, list) => {
 		if (!list.length) return;
@@ -206,8 +222,10 @@ async function confirm() {
 	return /^y(es)?$/i.test(answer.trim());
 }
 
-async function downloadVerified(branch, rel, wantSha) {
-	const url = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${encodeURIComponent(branch)}/${rel}`;
+async function downloadVerified(branch, rel, wantSha, source) {
+	const owner = (source && source.owner) || OWNER;
+	const repo = (source && source.repo) || REPO;
+	const url = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${rel}`;
 	for (let attempt = 1; attempt <= 2; attempt++) {
 		const buf = await httpsGet(url, { binary: true });
 		if (blobSha(buf) === wantSha) return buf;
@@ -230,8 +248,8 @@ function writeFile(root, rel, buf) {
 	fs.writeFileSync(dest, buf);
 }
 
-function runNpmInstall(root) {
-	console.log('package.json changed — running npm install --omit=dev ...');
+function runNpmInstall(root, say) {
+	(say || console.log)('package.json changed — running npm install --omit=dev ...');
 	const res = spawnSync('npm', ['install', '--omit=dev'], {
 		cwd: root,
 		stdio: 'inherit',
@@ -250,15 +268,80 @@ function tryPm2Restart() {
 	if (res.status !== 0) console.log('pm2 restart exited non-zero — check `pm2 status`');
 }
 
+// --- the two halves the bot itself uses (auto-update watcher, -update cmd) ---
+
+// checks GitHub and builds the plan. touches nothing. opts: { repo, branch }
+async function checkForUpdates(root, opts = {}) {
+	const source = sourceMod.detectSource(root, { repo: opts.repo, branch: opts.branch });
+	const { headSha, files: remoteFiles } = await fetchTree(source.branch, source);
+	const manifest = readManifest(root);
+	const plan = buildPlan(root, remoteFiles, manifest);
+	return { source, headSha, remoteFiles, manifest, plan, upToDate: !planHasWork(plan) };
+}
+
+// applies a plan from checkForUpdates: downloads + verifies everything
+// BEFORE writing anything, backs replaced files up, writes the manifest,
+// runs npm install only if package.json changed. opts: { noBackup, log }
+// where log is a (msg) => void progress sink (console.log by default).
+async function applyUpdate(root, check, opts = {}) {
+	const say = opts.log || console.log;
+	const { plan, remoteFiles, source } = check;
+	const branch = source.branch;
+
+	let backupDir = null;
+	if (!opts.noBackup) {
+		const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+		backupDir = path.join(root, BACKUP_DIR, stamp);
+		fs.mkdirSync(backupDir, { recursive: true });
+	}
+
+	// download + verify everything BEFORE writing anything, so a bad
+	// download can't leave the bot half-updated
+	const downloads = [];
+	for (const rel of [...plan.added, ...plan.updated])
+		downloads.push([rel, await downloadVerified(branch, rel, remoteFiles[rel], source)]);
+	const configDownloads = [];
+	for (const rel of plan.configNew)
+		configDownloads.push([rel, await downloadVerified(branch, rel, remoteFiles[rel], source)]);
+
+	if (backupDir) {
+		for (const rel of [...plan.updated, ...plan.deleted]) backupFile(root, backupDir, rel);
+	}
+
+	for (const [rel, buf] of downloads) writeFile(root, rel, buf);
+	for (const [rel, buf] of configDownloads) writeFile(root, rel + '.new', buf);
+	for (const rel of plan.deleted) fs.unlinkSync(path.join(root, rel));
+
+	writeManifest(root, branch, check.headSha, remoteFiles);
+
+	const npmNeeded = plan.added.includes('package.json') || plan.updated.includes('package.json');
+	// ig-chat-api/package.json changing alone never triggers npm install —
+	// its only dependency (axios) already lives in the root package.json
+	if (npmNeeded) runNpmInstall(root, say);
+
+	return {
+		backupDir,
+		npmNeeded,
+		added: plan.added.length,
+		updated: plan.updated.length,
+		deleted: plan.deleted.length,
+		configNew: plan.configNew.length,
+		skipped: plan.skipped.length,
+		changed: planChangedCount(plan)
+	};
+}
+
 function parseArgs(argv) {
-	const opts = { branch: DEFAULT_BRANCH, force: false, dryRun: false, noBackup: false, restart: false, root: process.env.ANCHESTOR_ROOT || null };
+	const opts = { branch: null, repo: null, force: false, dryRun: false, check: false, noBackup: false, restart: false, root: process.env.ANCHESTOR_ROOT || null };
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === '--dry-run') opts.dryRun = true;
+		else if (arg === '--check') opts.check = true;
 		else if (arg === '--force') opts.force = true;
 		else if (arg === '--no-backup') opts.noBackup = true;
 		else if (arg === '--restart') opts.restart = true;
 		else if (arg === '--branch') opts.branch = argv[++i] || opts.branch;
+		else if (arg === '--repo') opts.repo = argv[++i] || opts.repo;
 		else if (arg === '--root') opts.root = argv[++i] || opts.root;
 		else if (arg === '--help' || arg === '-h') opts.help = true;
 		else throw new Error(`unknown flag: ${arg} (see --help)`);
@@ -268,14 +351,21 @@ function parseArgs(argv) {
 
 function usage() {
 	console.log([
-		'usage: node update.js [--dry-run] [--force] [--no-backup] [--restart] [--branch <name>] [--root <dir>]',
+		'usage: node update.js [--dry-run] [--check] [--force] [--no-backup] [--restart] [--branch <name>] [--repo <owner/name>] [--root <dir>]',
 		'',
 		'  --dry-run   show what would change, write nothing',
+		'  --check     exit 0 if up to date, 2 if an update is available (writes nothing)',
 		'  --force     skip the confirmation prompt',
 		'  --no-backup don\'t copy replaced files into update-backup/',
 		'  --restart   pm2 restart anchestor after a successful update',
-		'  --branch    update from a branch other than main',
+		'  --branch    update from a branch other than the detected one',
+		'  --repo      update from another repo ("owner/name") — a fork, for example',
 		'  --root      bot directory (default: this script\'s folder, or ANCHESTOR_ROOT)',
+		'',
+		'which repo? --repo wins, then config.json `update.repo`, then the git',
+		'remote of the bot folder (a fork updates from itself), then upstream.',
+		'branch: --branch, then config.json `update.branch`, then the checked-out',
+		'git branch, then main.',
 		'',
 		'protected (never touched): account.txt, data/, database/data/, downloads/,',
 		'config.json, configCommands.json, configIgApi.json, .env, node_modules/',
@@ -290,17 +380,21 @@ async function main(argv) {
 		return 0;
 	}
 	const root = path.resolve(opts.root || __dirname);
-	console.log(`anchestor updater — ${OWNER}/${REPO}@${opts.branch} → ${root}`);
+	// print the target first, so even a failed fetch says which repo it tried
+	const target = sourceMod.detectSource(root, opts);
+	console.log(`anchestor updater — ${target.owner}/${target.repo}@${target.branch} → ${root}`);
+	const check = await checkForUpdates(root, opts);
 
-	const { headSha, files: remoteFiles } = await fetchTree(opts.branch);
-	const manifest = readManifest(root);
-	const plan = buildPlan(root, remoteFiles, manifest);
-
-	if (!planHasWork(plan)) {
+	if (check.upToDate) {
 		console.log('already up to date — nothing to do.');
 		return 0;
 	}
-	printPlan(plan);
+	printPlan(check.plan);
+
+	if (opts.check) {
+		console.log('update available.');
+		return 2;
+	}
 
 	if (opts.dryRun) {
 		console.log('dry run — nothing was written.');
@@ -312,42 +406,13 @@ async function main(argv) {
 		return 0;
 	}
 
-	let backupDir = null;
-	if (!opts.noBackup) {
-		const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-		backupDir = path.join(root, BACKUP_DIR, stamp);
-		fs.mkdirSync(backupDir, { recursive: true });
-	}
-
-	// download + verify everything BEFORE writing anything, so a bad
-	// download can't leave the bot half-updated
-	const downloads = [];
-	for (const rel of [...plan.added, ...plan.updated])
-		downloads.push([rel, await downloadVerified(opts.branch, rel, remoteFiles[rel])]);
-	const configDownloads = [];
-	for (const rel of plan.configNew)
-		configDownloads.push([rel, await downloadVerified(opts.branch, rel, remoteFiles[rel])]);
-
-	if (backupDir) {
-		for (const rel of [...plan.updated, ...plan.deleted]) backupFile(root, backupDir, rel);
-	}
-
-	for (const [rel, buf] of downloads) writeFile(root, rel, buf);
-	for (const [rel, buf] of configDownloads) writeFile(root, rel + '.new', buf);
-	for (const rel of plan.deleted) fs.unlinkSync(path.join(root, rel));
-
-	writeManifest(root, opts.branch, headSha, remoteFiles);
-
-	const npmNeeded = plan.added.includes('package.json') || plan.updated.includes('package.json');
-	// ig-chat-api/package.json changing alone never triggers npm install —
-	// its only dependency (axios) already lives in the root package.json
-	if (npmNeeded) runNpmInstall(root);
+	const result = await applyUpdate(root, check, opts);
 
 	console.log('\nupdate done:');
-	console.log(`  added ${plan.added.length}, updated ${plan.updated.length}, deleted ${plan.deleted.length}, config .new ${plan.configNew.length}, skipped ${plan.skipped.length}`);
-	if (backupDir) console.log(`  backup: ${path.relative(root, backupDir)}/`);
-	if (plan.configNew.length) console.log(`  merge ${plan.configNew.map((f) => f + '.new').join(', ')} into your config by hand`);
-	console.log(npmNeeded ? '  npm install ran (package.json changed)' : '  npm install skipped (package.json unchanged)');
+	console.log(`  added ${result.added}, updated ${result.updated}, deleted ${result.deleted}, config .new ${result.configNew}, skipped ${result.skipped}`);
+	if (result.backupDir) console.log(`  backup: ${path.relative(root, result.backupDir)}/`);
+	if (result.configNew) console.log(`  merge ${check.plan.configNew.map((f) => f + '.new').join(', ')} into your config by hand`);
+	console.log(result.npmNeeded ? '  npm install ran (package.json changed)' : '  npm install skipped (package.json unchanged)');
 	if (opts.restart) tryPm2Restart();
 	else console.log('  restart the bot: node index.js (or pm2 restart anchestor)');
 	return 0;
@@ -363,4 +428,4 @@ if (require.main === module) {
 	);
 }
 
-module.exports = { main, buildPlan, blobSha, isProtected, fetchTree };
+module.exports = { main, buildPlan, blobSha, isProtected, fetchTree, checkForUpdates, applyUpdate, planChangedCount, detectSource: sourceMod.detectSource };
