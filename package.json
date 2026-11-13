@@ -1,1 +1,20 @@
-{"author":"xemonbae01","dependencies":{"axios":"^1.7.9","mongodb":"^6.0.0"},"description":"anchestor — an Instagram DM bot. Developed by xemonbae01","engines":{"node":">=18"},"license":"MIT","main":"index.js","name":"anchestor","scripts":{"migrate:mongo":"node scripts/migrate-to-mongo.js","start":"node index.js","update":"node update.js"},"version":"1.0.0"}
+{
+  "name": "anchestor",
+  "version": "1.0.0",
+  "description": "anchestor — an Instagram DM bot. Developed by xemonbae01",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "update": "node update.js",
+    "migrate:mongo": "node scripts/migrate-to-mongo.js"
+  },
+  "author": "xemonbae01",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "mongodb": "^6.0.0"
+  }
+}
